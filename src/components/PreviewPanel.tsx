@@ -1,0 +1,176 @@
+"use client";
+
+import { useState } from "react";
+import { Code2, Eye, RefreshCw, AlertCircle, Wand2, Sparkles } from "lucide-react";
+import { GenerateResult, TabType } from "@/lib/types";
+import MockWebsite from "./MockWebsite";
+import CodeViewer from "./CodeViewer";
+
+interface PreviewPanelProps {
+  result: GenerateResult | null;
+  isGenerating: boolean;
+  error: string | null;
+}
+
+export default function PreviewPanel({ result, isGenerating, error }: PreviewPanelProps) {
+  const [activeTab, setActiveTab] = useState<TabType>("preview");
+
+  const tabs: { id: TabType; label: string; icon: React.ReactNode }[] = [
+    { id: "preview", label: "Preview", icon: <Eye className="h-3.5 w-3.5" /> },
+    { id: "code", label: "Code", icon: <Code2 className="h-3.5 w-3.5" /> },
+  ];
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      {/* Browser chrome bar */}
+      <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50/80 px-4 py-2.5">
+        {/* Dots */}
+        <div className="flex items-center gap-1.5">
+          <div className="h-3 w-3 rounded-full bg-red-400" />
+          <div className="h-3 w-3 rounded-full bg-yellow-400" />
+          <div className="h-3 w-3 rounded-full bg-green-400" />
+        </div>
+
+        {/* Fake URL bar */}
+        <div className="mx-4 flex flex-1 items-center gap-2 rounded-md bg-white px-3 py-1.5 text-xs text-gray-400 ring-1 ring-gray-200">
+          <div className="h-1.5 w-1.5 rounded-full bg-green-400" />
+          <span className="truncate">
+            {result ? `preview.aiwebdesigner.app/${result.template.name?.toLowerCase().replace(/\s+/g, "-")}` : "preview.aiwebdesigner.app"}
+          </span>
+        </div>
+
+        {/* Tabs + badge */}
+        <div className="flex items-center gap-2">
+          {result?.isAiGenerated && (
+            <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2.5 py-0.5 text-[10px] font-semibold text-violet-700">
+              <Wand2 className="h-2.5 w-2.5" />
+              AI 生成
+            </span>
+          )}
+          {result && !result.isAiGenerated && (
+            <span className="flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-[10px] font-medium text-gray-500">
+              <Sparkles className="h-2.5 w-2.5" />
+              Mock
+            </span>
+          )}
+          <div className="flex items-center gap-0.5 rounded-lg bg-gray-200/80 p-0.5">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                  activeTab === tab.id
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Content area */}
+      <div className="relative flex-1 overflow-hidden">
+        {/* Generating overlay */}
+        {isGenerating && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/90 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-5">
+              <div className="relative flex h-16 w-16 items-center justify-center">
+                <div className="absolute h-16 w-16 animate-spin rounded-full border-4 border-indigo-100 border-t-indigo-500" />
+                <div className="absolute h-10 w-10 animate-spin rounded-full border-4 border-violet-100 border-t-violet-400 [animation-direction:reverse]" />
+                <RefreshCw className="h-5 w-5 text-indigo-500" />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-semibold text-gray-800">AI 正在构建你的网页…</p>
+                <p className="mt-1 text-xs text-gray-400">正在生成结构、配色与内容</p>
+              </div>
+              <div className="flex gap-1.5">
+                {["Navbar", "Hero", "Features", "CTA"].map((s, i) => (
+                  <span
+                    key={s}
+                    className="rounded-full bg-indigo-50 px-2.5 py-1 text-[10px] font-medium text-indigo-500"
+                    style={{ animationDelay: `${i * 200}ms` }}
+                  >
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Error state */}
+        {error && !isGenerating && (
+          <div className="flex h-full items-center justify-center p-8">
+            <div className="w-full max-w-sm rounded-2xl border border-red-100 bg-red-50 p-6 text-center">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-red-100">
+                <AlertCircle className="h-6 w-6 text-red-500" />
+              </div>
+              <p className="text-sm font-semibold text-red-800">生成失败</p>
+              <p className="mt-2 text-xs leading-relaxed text-red-600">{error}</p>
+              <p className="mt-3 text-[11px] text-red-400">
+                请检查 API Key 是否正确，或网络是否可以访问该服务
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!result && !isGenerating && !error && (
+          <div className="flex h-full flex-col items-center justify-center gap-6 p-8">
+            <div className="text-center">
+              <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-50 to-violet-50 ring-1 ring-indigo-100">
+                <Sparkles className="h-9 w-9 text-indigo-400" />
+              </div>
+              <p className="text-base font-semibold text-gray-700">
+                在左侧输入需求，点击 Generate
+              </p>
+              <p className="mt-1.5 text-sm text-gray-400">
+                生成的网页预览将在此处展示
+              </p>
+            </div>
+
+            {/* Skeleton preview */}
+            <div className="w-full max-w-sm space-y-3 opacity-40">
+              <div className="h-8 w-full rounded-lg bg-gray-100" />
+              <div className="h-24 w-full rounded-xl bg-gray-100" />
+              <div className="grid grid-cols-3 gap-2">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-16 rounded-lg bg-gray-100" />
+                ))}
+              </div>
+              <div className="h-12 w-2/3 mx-auto rounded-lg bg-gray-100" />
+            </div>
+
+            <div className="flex flex-wrap justify-center gap-2">
+              {["Navbar", "Hero Section", "Features", "CTA", "Footer"].map((s) => (
+                <span
+                  key={s}
+                  className="rounded-full border border-dashed border-gray-200 px-3 py-1 text-xs text-gray-300"
+                >
+                  {s}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Result */}
+        {result && !isGenerating && !error && (
+          <div className="h-full overflow-auto">
+            {activeTab === "preview" ? (
+              <MockWebsite template={result.template} />
+            ) : (
+              <div className="h-full p-4">
+                <CodeViewer code={result.code} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
