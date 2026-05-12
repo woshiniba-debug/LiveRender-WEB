@@ -5,6 +5,7 @@ import Header from "@/components/Header";
 import PromptInput from "@/components/PromptInput";
 import PreviewPanel from "@/components/PreviewPanel";
 import ApiSettings from "@/components/ApiSettings";
+import MobileTabBar, { MobileTab } from "@/components/MobileTabBar";
 import { ApiConfig, GenerateResult, HistoryEntry } from "@/lib/types";
 import { API_PROVIDERS } from "@/lib/apiProviders";
 import { generateMockCode, matchTemplate } from "@/lib/mockData";
@@ -21,24 +22,20 @@ export default function Home() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [mobileTab, setMobileTab] = useState<MobileTab>("input");
 
-  // Load persisted state on mount
   useEffect(() => {
     try {
-      const savedConfig = localStorage.getItem(STORAGE_KEY);
-      if (savedConfig) {
-        const parsed = JSON.parse(savedConfig) as ApiConfig;
-        if (parsed.apiKey && parsed.provider && parsed.model) {
-          setApiConfig(parsed);
-        }
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as ApiConfig;
+        if (parsed.apiKey && parsed.provider && parsed.model) setApiConfig(parsed);
       }
     } catch { /* ignore */ }
 
     try {
-      const savedHistory = localStorage.getItem(HISTORY_KEY);
-      if (savedHistory) {
-        setHistory(JSON.parse(savedHistory) as HistoryEntry[]);
-      }
+      const saved = localStorage.getItem(HISTORY_KEY);
+      if (saved) setHistory(JSON.parse(saved) as HistoryEntry[]);
     } catch { /* ignore */ }
   }, []);
 
@@ -52,33 +49,27 @@ export default function Home() {
     }
   };
 
-  const pushHistory = useCallback(
-    (prompt: string, generateResult: GenerateResult) => {
-      const entry: HistoryEntry = {
-        id: String(Date.now()),
-        prompt,
-        result: generateResult,
-        createdAt: Date.now(),
-      };
-      setHistory((prev) => {
-        const next = [entry, ...prev.filter((e) => e.prompt !== prompt)].slice(
-          0,
-          MAX_HISTORY
-        );
-        try {
-          localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
-        } catch { /* ignore quota errors */ }
-        return next;
-      });
-    },
-    []
-  );
+  const pushHistory = useCallback((prompt: string, gen: GenerateResult) => {
+    const entry: HistoryEntry = {
+      id: String(Date.now()),
+      prompt,
+      result: gen,
+      createdAt: Date.now(),
+    };
+    setHistory((prev) => {
+      const next = [entry, ...prev.filter((e) => e.prompt !== prompt)].slice(0, MAX_HISTORY);
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   const runGenerate = useCallback(
     async (prompt: string) => {
       setIsGenerating(true);
       setError(null);
       setLastPrompt(prompt);
+      // Auto-switch to preview on mobile as soon as generation starts
+      setMobileTab("preview");
 
       if (apiConfig?.apiKey) {
         try {
@@ -102,33 +93,25 @@ export default function Home() {
 
           const template = data.template!;
           const code = generateMockCode(template);
-          const providerName = API_PROVIDERS[apiConfig.provider]?.name;
-          const generated: GenerateResult = {
+          const gen: GenerateResult = {
             template,
             code,
             timestamp: Date.now(),
             isAiGenerated: true,
-            providerName,
+            providerName: API_PROVIDERS[apiConfig.provider]?.name,
           };
-          setResult(generated);
-          pushHistory(prompt, generated);
+          setResult(gen);
+          pushHistory(prompt, gen);
         } catch (err) {
-          setError(
-            err instanceof Error ? err.message : "生成失败，请检查 API Key 是否正确"
-          );
+          setError(err instanceof Error ? err.message : "生成失败，请检查 API Key 是否正确");
         }
       } else {
         await new Promise((r) => setTimeout(r, 1200 + Math.random() * 500));
         const template = matchTemplate(prompt);
         const code = generateMockCode(template);
-        const generated: GenerateResult = {
-          template,
-          code,
-          timestamp: Date.now(),
-          isAiGenerated: false,
-        };
-        setResult(generated);
-        pushHistory(prompt, generated);
+        const gen: GenerateResult = { template, code, timestamp: Date.now(), isAiGenerated: false };
+        setResult(gen);
+        pushHistory(prompt, gen);
       }
 
       setIsGenerating(false);
@@ -137,27 +120,30 @@ export default function Home() {
   );
 
   const handleGenerate = (prompt: string) => runGenerate(prompt);
-
-  const handleRegenerate = () => {
-    if (lastPrompt) runGenerate(lastPrompt);
-  };
-
+  const handleRegenerate = () => { if (lastPrompt) runGenerate(lastPrompt); };
   const handleSelectHistory = (entry: HistoryEntry) => {
     setResult(entry.result);
     setLastPrompt(entry.prompt);
     setError(null);
+    setMobileTab("preview");
   };
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[#f8fafc]">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#f8fafc]">
       <Header
         apiConfig={apiConfig}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       <main className="flex flex-1 overflow-hidden">
-        {/* Left panel */}
-        <aside className="flex w-[320px] shrink-0 flex-col overflow-hidden border-r border-gray-100 bg-white xl:w-[360px]">
+        {/* Left panel — input */}
+        <aside
+          className={`
+            flex flex-col overflow-hidden border-r border-gray-100 bg-white
+            w-full md:w-[320px] xl:w-[360px] md:shrink-0
+            ${mobileTab === "input" ? "flex" : "hidden"} md:flex
+          `}
+        >
           <PromptInput
             onGenerate={handleGenerate}
             isGenerating={isGenerating}
@@ -168,8 +154,14 @@ export default function Home() {
           />
         </aside>
 
-        {/* Right panel */}
-        <section className="flex flex-1 flex-col overflow-hidden p-4 xl:p-5">
+        {/* Right panel — preview */}
+        <section
+          className={`
+            flex-col overflow-hidden p-3 sm:p-4 xl:p-5
+            flex-1
+            ${mobileTab === "preview" ? "flex" : "hidden"} md:flex
+          `}
+        >
           <PreviewPanel
             result={result}
             isGenerating={isGenerating}
@@ -179,6 +171,14 @@ export default function Home() {
           />
         </section>
       </main>
+
+      {/* Mobile bottom tab bar */}
+      <MobileTabBar
+        activeTab={mobileTab}
+        onTabChange={setMobileTab}
+        hasResult={!!result || !!error}
+        isGenerating={isGenerating}
+      />
 
       <ApiSettings
         isOpen={isSettingsOpen}
