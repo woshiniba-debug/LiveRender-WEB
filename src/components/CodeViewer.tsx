@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { Check, Copy, Terminal } from "lucide-react";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 interface CodeViewerProps {
   code: string;
@@ -16,8 +18,7 @@ export default function CodeViewer({ code }: CodeViewerProps) {
     } catch {
       const el = document.createElement("textarea");
       el.value = code;
-      el.style.position = "fixed";
-      el.style.opacity = "0";
+      el.style.cssText = "position:fixed;opacity:0";
       document.body.appendChild(el);
       el.select();
       document.execCommand("copy");
@@ -31,8 +32,8 @@ export default function CodeViewer({ code }: CodeViewerProps) {
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden rounded-xl bg-gray-950 ring-1 ring-white/5">
-      {/* Code header */}
-      <div className="flex items-center justify-between border-b border-white/5 bg-gray-900/80 px-4 py-2.5">
+      {/* Header */}
+      <div className="flex shrink-0 items-center justify-between border-b border-white/5 bg-gray-900/80 px-4 py-2.5">
         <div className="flex items-center gap-2 text-xs text-gray-500">
           <Terminal className="h-3.5 w-3.5 text-gray-600" />
           <span className="font-mono">GeneratedPage.tsx</span>
@@ -62,21 +63,34 @@ export default function CodeViewer({ code }: CodeViewerProps) {
         </button>
       </div>
 
-      {/* Code body */}
-      <div className="flex flex-1 overflow-auto">
-        {/* Line numbers */}
-        <div className="select-none border-r border-white/5 bg-gray-900/30 px-3 py-4 text-right">
-          {code.split("\n").map((_, i) => (
-            <div key={i} className="font-mono text-xs leading-5 text-gray-700">
-              {i + 1}
-            </div>
-          ))}
-        </div>
-
-        {/* Code */}
-        <pre className="flex-1 overflow-x-auto p-4 font-mono text-xs leading-5 text-gray-300">
-          <code>{code}</code>
-        </pre>
+      {/* Syntax-highlighted code */}
+      <div className="flex-1 overflow-auto">
+        <SyntaxHighlighter
+          language="tsx"
+          style={vscDarkPlus}
+          showLineNumbers
+          lineNumberStyle={{
+            minWidth: "2.8em",
+            paddingRight: "1em",
+            color: "#3d4451",
+            userSelect: "none",
+            fontSize: "11px",
+          }}
+          customStyle={{
+            margin: 0,
+            padding: "16px 0",
+            background: "transparent",
+            fontSize: "12px",
+            lineHeight: "1.6",
+            height: "100%",
+            overflow: "visible",
+          }}
+          codeTagProps={{
+            style: { fontFamily: "var(--font-geist-mono), 'Fira Code', monospace" },
+          }}
+        >
+          {code}
+        </SyntaxHighlighter>
       </div>
     </div>
   );

@@ -20,6 +20,13 @@ export interface Feature {
 
 export type TabType = "preview" | "code";
 
+export interface HistoryEntry {
+  id: string;
+  prompt: string;
+  result: GenerateResult;
+  createdAt: number;
+}
+
 export interface GenerateResult {
   template: MockTemplate;
   code: string;

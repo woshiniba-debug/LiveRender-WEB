@@ -1,8 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { Code2, Eye, RefreshCw, AlertCircle, Wand2, Sparkles } from "lucide-react";
+import {
+  Code2,
+  Eye,
+  RefreshCw,
+  AlertCircle,
+  Wand2,
+  Sparkles,
+  Download,
+  RotateCcw,
+} from "lucide-react";
 import { GenerateResult, TabType } from "@/lib/types";
+import { exportHtml } from "@/lib/exportHtml";
 import MockWebsite from "./MockWebsite";
 import CodeViewer from "./CodeViewer";
 
@@ -10,9 +20,17 @@ interface PreviewPanelProps {
   result: GenerateResult | null;
   isGenerating: boolean;
   error: string | null;
+  lastPrompt: string | null;
+  onRegenerate: () => void;
 }
 
-export default function PreviewPanel({ result, isGenerating, error }: PreviewPanelProps) {
+export default function PreviewPanel({
+  result,
+  isGenerating,
+  error,
+  lastPrompt,
+  onRegenerate,
+}: PreviewPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("preview");
 
   const tabs: { id: TabType; label: string; icon: React.ReactNode }[] = [
@@ -20,39 +38,79 @@ export default function PreviewPanel({ result, isGenerating, error }: PreviewPan
     { id: "code", label: "Code", icon: <Code2 className="h-3.5 w-3.5" /> },
   ];
 
+  const handleDownload = () => {
+    if (result) exportHtml(result.template);
+  };
+
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
       {/* Browser chrome bar */}
-      <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50/80 px-4 py-2.5">
+      <div className="flex items-center gap-3 border-b border-gray-100 bg-gray-50/80 px-4 py-2.5">
         {/* Dots */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           <div className="h-3 w-3 rounded-full bg-red-400" />
           <div className="h-3 w-3 rounded-full bg-yellow-400" />
           <div className="h-3 w-3 rounded-full bg-green-400" />
         </div>
 
         {/* Fake URL bar */}
-        <div className="mx-4 flex flex-1 items-center gap-2 rounded-md bg-white px-3 py-1.5 text-xs text-gray-400 ring-1 ring-gray-200">
-          <div className="h-1.5 w-1.5 rounded-full bg-green-400" />
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md bg-white px-3 py-1.5 text-xs text-gray-400 ring-1 ring-gray-200">
+          <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-green-400" />
           <span className="truncate">
-            {result ? `preview.aiwebdesigner.app/${result.template.name?.toLowerCase().replace(/\s+/g, "-")}` : "preview.aiwebdesigner.app"}
+            {result
+              ? `preview.aiwebdesigner.app/${result.template.name?.toLowerCase().replace(/\s+/g, "-")}`
+              : "preview.aiwebdesigner.app"}
           </span>
         </div>
 
-        {/* Tabs + badge */}
-        <div className="flex items-center gap-2">
+        {/* Action zone */}
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* AI / Mock badge */}
           {result?.isAiGenerated && (
-            <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2.5 py-0.5 text-[10px] font-semibold text-violet-700">
+            <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
               <Wand2 className="h-2.5 w-2.5" />
-              AI 生成
+              AI
             </span>
           )}
           {result && !result.isAiGenerated && (
-            <span className="flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-[10px] font-medium text-gray-500">
+            <span className="flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">
               <Sparkles className="h-2.5 w-2.5" />
               Mock
             </span>
           )}
+
+          {/* Divider */}
+          {result && <div className="h-4 w-px bg-gray-200" />}
+
+          {/* Regenerate */}
+          {lastPrompt && (
+            <button
+              onClick={onRegenerate}
+              disabled={isGenerating}
+              title={`重新生成：${lastPrompt}`}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-all hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <RotateCcw className={`h-3.5 w-3.5 ${isGenerating ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">重新生成</span>
+            </button>
+          )}
+
+          {/* Download HTML */}
+          {result && (
+            <button
+              onClick={handleDownload}
+              title="下载独立 HTML 文件"
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-all hover:border-green-300 hover:bg-green-50 hover:text-green-700"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">导出 HTML</span>
+            </button>
+          )}
+
+          {/* Divider */}
+          <div className="h-4 w-px bg-gray-200" />
+
+          {/* Tabs */}
           <div className="flex items-center gap-0.5 rounded-lg bg-gray-200/80 p-0.5">
             {tabs.map((tab) => (
               <button
@@ -72,6 +130,18 @@ export default function PreviewPanel({ result, isGenerating, error }: PreviewPan
         </div>
       </div>
 
+      {/* Prompt bar — shows current prompt when result exists */}
+      {(result || lastPrompt) && !isGenerating && (
+        <div className="flex items-center gap-2 border-b border-gray-100 bg-gray-50/50 px-4 py-2">
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+            Prompt
+          </span>
+          <span className="min-w-0 flex-1 truncate text-xs text-gray-500">
+            {lastPrompt ?? ""}
+          </span>
+        </div>
+      )}
+
       {/* Content area */}
       <div className="relative flex-1 overflow-hidden">
         {/* Generating overlay */}
@@ -88,11 +158,10 @@ export default function PreviewPanel({ result, isGenerating, error }: PreviewPan
                 <p className="mt-1 text-xs text-gray-400">正在生成结构、配色与内容</p>
               </div>
               <div className="flex gap-1.5">
-                {["Navbar", "Hero", "Features", "CTA"].map((s, i) => (
+                {["Navbar", "Hero", "Features", "CTA"].map((s) => (
                   <span
                     key={s}
                     className="rounded-full bg-indigo-50 px-2.5 py-1 text-[10px] font-medium text-indigo-500"
-                    style={{ animationDelay: `${i * 200}ms` }}
                   >
                     {s}
                   </span>
@@ -102,7 +171,7 @@ export default function PreviewPanel({ result, isGenerating, error }: PreviewPan
           </div>
         )}
 
-        {/* Error state */}
+        {/* Error */}
         {error && !isGenerating && (
           <div className="flex h-full items-center justify-center p-8">
             <div className="w-full max-w-sm rounded-2xl border border-red-100 bg-red-50 p-6 text-center">
@@ -114,6 +183,15 @@ export default function PreviewPanel({ result, isGenerating, error }: PreviewPan
               <p className="mt-3 text-[11px] text-red-400">
                 请检查 API Key 是否正确，或网络是否可以访问该服务
               </p>
+              {lastPrompt && (
+                <button
+                  onClick={onRegenerate}
+                  className="mt-4 flex items-center gap-1.5 mx-auto rounded-lg border border-red-200 bg-white px-4 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  重试
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -132,8 +210,6 @@ export default function PreviewPanel({ result, isGenerating, error }: PreviewPan
                 生成的网页预览将在此处展示
               </p>
             </div>
-
-            {/* Skeleton preview */}
             <div className="w-full max-w-sm space-y-3 opacity-40">
               <div className="h-8 w-full rounded-lg bg-gray-100" />
               <div className="h-24 w-full rounded-xl bg-gray-100" />
@@ -142,9 +218,8 @@ export default function PreviewPanel({ result, isGenerating, error }: PreviewPan
                   <div key={i} className="h-16 rounded-lg bg-gray-100" />
                 ))}
               </div>
-              <div className="h-12 w-2/3 mx-auto rounded-lg bg-gray-100" />
+              <div className="mx-auto h-12 w-2/3 rounded-lg bg-gray-100" />
             </div>
-
             <div className="flex flex-wrap justify-center gap-2">
               {["Navbar", "Hero Section", "Features", "CTA", "Footer"].map((s) => (
                 <span
