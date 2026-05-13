@@ -35,6 +35,28 @@ export interface GenerateResult {
   providerName?: string;
 }
 
+// ─── Discriminated union for generation state ────────────────────────────────
+
+export type GenerateState =
+  | { status: "idle" }
+  | {
+      status: "generating";
+      prompt: string;
+      // Partial fields streamed progressively from the AI.
+      partial?: Partial<MockTemplate>;
+      streamText?: string;
+    }
+  | { status: "success"; result: GenerateResult; prompt: string }
+  | { status: "error"; message: string; prompt: string };
+
+// ─── Streaming SSE event payloads ────────────────────────────────────────────
+
+export type StreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "partial"; template: Partial<MockTemplate> }
+  | { type: "done"; template: MockTemplate }
+  | { type: "error"; message: string };
+
 // ─── API Types ────────────────────────────────────────────────────────────────
 
 export type Region = "cn" | "international";

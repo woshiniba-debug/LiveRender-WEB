@@ -148,10 +148,20 @@ export const API_PROVIDERS: Record<ProviderId, ApiProvider> = {
   },
 };
 
-export const CN_PROVIDERS = (Object.values(API_PROVIDERS) as ApiProvider[]).filter(
+// Precompute once at module load — components no longer call Object.values
+// on every render.
+const ALL_PROVIDERS: ApiProvider[] = Object.values(API_PROVIDERS);
+
+export const CN_PROVIDERS: readonly ApiProvider[] = ALL_PROVIDERS.filter(
   (p) => p.region === "cn"
 );
 
-export const INTERNATIONAL_PROVIDERS = (Object.values(API_PROVIDERS) as ApiProvider[]).filter(
+export const INTERNATIONAL_PROVIDERS: readonly ApiProvider[] = ALL_PROVIDERS.filter(
   (p) => p.region === "international"
 );
+
+// Convenience accessor when ProviderId is dynamic; identical to API_PROVIDERS[id]
+// but typed to never be `undefined`.
+export function getApiProvider(id: ProviderId): ApiProvider {
+  return API_PROVIDERS[id];
+}

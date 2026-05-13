@@ -4,9 +4,11 @@ import { MockTemplate } from "@/lib/types";
 
 interface MockWebsiteProps {
   template: MockTemplate;
+  /** When true, render hero text with a streaming-cursor effect. */
+  streaming?: boolean;
 }
 
-export default function MockWebsite({ template }: MockWebsiteProps) {
+export default function MockWebsite({ template, streaming = false }: MockWebsiteProps) {
   const { primaryColor, accentColor } = template;
 
   return (
@@ -65,10 +67,22 @@ export default function MockWebsite({ template }: MockWebsiteProps) {
 
           <h1 className="mb-5 text-4xl font-extrabold leading-tight tracking-tight text-gray-900 md:text-5xl">
             {template.heroTitle}
+            {streaming && (
+              <span
+                aria-hidden
+                className="ml-1 inline-block h-[1em] w-[2px] translate-y-1 animate-pulse bg-indigo-500 align-middle"
+              />
+            )}
           </h1>
 
           <p className="mx-auto mb-9 max-w-xl text-base leading-relaxed text-gray-500">
             {template.heroSubtitle}
+            {streaming && template.heroSubtitle && (
+              <span
+                aria-hidden
+                className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-0.5 animate-pulse bg-gray-400 align-middle"
+              />
+            )}
           </p>
 
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">

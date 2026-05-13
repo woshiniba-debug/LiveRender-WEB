@@ -1,208 +1,162 @@
-import { NextRequest, NextResponse } from "next/server";
-import { MockTemplate } from "@/lib/types";
+import { NextRequest } from "next/server";
+import type { ProviderId, StreamEvent, MockTemplate } from "@/lib/types";
+import {
+  extractJson,
+  normalizeTemplate,
+  safeParseTemplate,
+} from "@/lib/providers/base";
+import { getProvider } from "@/lib/providers/registry";
 
-const SYSTEM_PROMPT = `You are an expert web designer AI. The user will describe a website in natural language (possibly Chinese or English). Analyze the description and return a JSON object for a website landing page template.
+// Force Node runtime so AbortSignal + ReadableStream behave consistently.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-Return ONLY a valid JSON object with this exact structure — no markdown, no explanation, just raw JSON:
-{
-  "name": "short template name",
-  "heroTitle": "compelling headline (≤20 chars if Chinese, ≤60 chars if English)",
-  "heroSubtitle": "2–3 sentence subtitle that matches the brand voice and user's language",
-  "ctaText": "action-oriented CTA button text (4–8 chars)",
-  "navItems": ["Nav1", "Nav2", "Nav3", "Nav4", "Nav5"],
-  "primaryColor": "#hexcolor",
-  "accentColor": "#hexcolor",
-  "features": [
-    { "icon": "emoji", "title": "feature title", "description": "2-sentence feature description" },
-    { "icon": "emoji", "title": "feature title", "description": "2-sentence feature description" },
-    { "icon": "emoji", "title": "feature title", "description": "2-sentence feature description" }
-  ]
+interface GenerateBody {
+  prompt?: string;
+  provider?: ProviderId;
+  apiKey?: string;
+  model?: string;
 }
 
-Design guidelines:
-- Match the language of user input (Chinese input → Chinese output, English input → English output)
-- Choose brand-appropriate hex colors (warm browns for coffee/food, indigo/purple for SaaS/tech, red/orange for fitness/energy)
-- accentColor should be a lighter or complementary shade of primaryColor
-- navItems should be realistic page names for the website type
-- features should be specific to the industry, not generic
-- Make all copy compelling and professional`;
+/**
+ * Best-effort progressive parser: takes accumulated text from the AI,
+ * extracts a JSON-ish slice, and attempts to parse top-level keys even
+ * if the JSON is still truncated. Returns `null` when nothing parseable yet.
+ */
+function progressiveParse(text: string): Partial<MockTemplate> | null {
+  const slice = extractJson(text);
+  if (!slice.startsWith("{")) return null;
 
-function safeParseJson(text: string): MockTemplate {
-  const cleaners = [
-    (s: string) => s,
-    (s: string) => {
-      const m = s.match(/```(?:json)?\s*([\s\S]*?)```/);
-      return m ? m[1].trim() : s;
-    },
-    (s: string) => {
-      const start = s.indexOf("{");
-      const end = s.lastIndexOf("}");
-      return start !== -1 && end !== -1 ? s.slice(start, end + 1) : s;
-    },
+  // Try full parse first — fastest path.
+  try {
+    return JSON.parse(slice) as Partial<MockTemplate>;
+  } catch {
+    // Fall through to key-by-key best-effort.
+  }
+
+  // Greedy single-pass extraction of string fields that have already closed.
+  const partial: Partial<MockTemplate> = {};
+  const stringFields: (keyof MockTemplate)[] = [
+    "name",
+    "heroTitle",
+    "heroSubtitle",
+    "ctaText",
+    "primaryColor",
+    "accentColor",
   ];
-
-  for (const clean of cleaners) {
-    try {
-      return JSON.parse(clean(text)) as MockTemplate;
-    } catch {
-      // try next cleaner
-    }
+  for (const field of stringFields) {
+    const re = new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`);
+    const m = slice.match(re);
+    if (m) (partial[field] as string) = m[1];
   }
-  throw new Error("无法解析 AI 返回的 JSON，请重试");
+  return Object.keys(partial).length ? partial : null;
 }
 
-function normalizeTemplate(raw: MockTemplate): MockTemplate {
-  return {
-    name: raw.name || "Generated Page",
-    heroTitle: raw.heroTitle || "Welcome",
-    heroSubtitle: raw.heroSubtitle || "A beautiful website, generated just for you.",
-    ctaText: raw.ctaText || "Get Started",
-    navItems: Array.isArray(raw.navItems) && raw.navItems.length > 0
-      ? raw.navItems.slice(0, 6)
-      : ["Home", "About", "Services", "Pricing", "Contact"],
-    primaryColor: /^#[0-9a-f]{6}$/i.test(raw.primaryColor ?? "") ? raw.primaryColor : "#6366F1",
-    accentColor: /^#[0-9a-f]{6}$/i.test(raw.accentColor ?? "") ? raw.accentColor : "#8B5CF6",
-    features: Array.isArray(raw.features)
-      ? raw.features.slice(0, 3).map((f) => ({
-          icon: f.icon || "✨",
-          title: f.title || "Feature",
-          description: f.description || "",
-        }))
-      : [],
-  };
+function sseEncode(event: StreamEvent): string {
+  return `data: ${JSON.stringify(event)}\n\n`;
 }
-
-// ─── Provider callers ─────────────────────────────────────────────────────────
-
-async function callOpenAICompatible(
-  prompt: string,
-  apiKey: string,
-  model: string,
-  provider: string
-) {
-  const baseUrls: Record<string, string> = {
-    openai: "https://api.openai.com/v1",
-    deepseek: "https://api.deepseek.com/v1",
-    kimi: "https://api.moonshot.cn/v1",
-    qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    zhipu: "https://open.bigmodel.cn/api/paas/v4",
-  };
-
-  const baseUrl = baseUrls[provider] ?? "https://api.openai.com/v1";
-  const supportsJsonMode = ["openai", "deepseek", "qwen"].includes(provider);
-
-  const body: Record<string, unknown> = {
-    model,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: prompt },
-    ],
-    temperature: 0.7,
-    max_tokens: 1024,
-  };
-
-  if (supportsJsonMode) {
-    body.response_format = { type: "json_object" };
-  }
-
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
-    throw new Error(err?.error?.message ?? `API 错误 ${res.status}`);
-  }
-
-  const data = await res.json() as { choices: { message: { content: string } }[] };
-  return safeParseJson(data.choices[0].message.content);
-}
-
-async function callClaude(prompt: string, apiKey: string, model: string) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
-    throw new Error(err?.error?.message ?? `API 错误 ${res.status}`);
-  }
-
-  const data = await res.json() as { content: { text: string }[] };
-  return safeParseJson(data.content[0].text);
-}
-
-async function callGemini(prompt: string, apiKey: string, model: string) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" },
-      }),
-    }
-  );
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
-    throw new Error(err?.error?.message ?? `API 错误 ${res.status}`);
-  }
-
-  const data = await res.json() as {
-    candidates: { content: { parts: { text: string }[] } }[];
-  };
-  return safeParseJson(data.candidates[0].content.parts[0].text);
-}
-
-// ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  let body: GenerateBody;
   try {
-    const body = await request.json() as {
-      prompt?: string;
-      provider?: string;
-      apiKey?: string;
-      model?: string;
-    };
-
-    const { prompt, provider, apiKey, model } = body;
-
-    if (!prompt || !provider || !apiKey || !model) {
-      return NextResponse.json({ error: "缺少必要参数" }, { status: 400 });
-    }
-
-    let raw: MockTemplate;
-
-    if (provider === "claude") {
-      raw = await callClaude(prompt, apiKey, model);
-    } else if (provider === "gemini") {
-      raw = await callGemini(prompt, apiKey, model);
-    } else {
-      raw = await callOpenAICompatible(prompt, apiKey, model, provider);
-    }
-
-    return NextResponse.json({ template: normalizeTemplate(raw) });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "生成失败";
-    return NextResponse.json({ error: message }, { status: 500 });
+    body = (await request.json()) as GenerateBody;
+  } catch {
+    return new Response(
+      JSON.stringify({ error: "请求体不是有效的 JSON" }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
+    );
   }
+
+  const { prompt, provider, apiKey, model } = body;
+  if (!prompt || !provider || !apiKey || !model) {
+    return new Response(
+      JSON.stringify({ error: "缺少必要参数" }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  let strategy;
+  try {
+    strategy = getProvider(provider);
+  } catch (err) {
+    return new Response(
+      JSON.stringify({
+        error: err instanceof Error ? err.message : "未知的 AI 提供商",
+      }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  const encoder = new TextEncoder();
+  // Bridge upstream abort (client disconnect) to provider fetch.
+  const abortController = new AbortController();
+  request.signal.addEventListener("abort", () => abortController.abort());
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let accumulated = "";
+      let lastPartialKeys = 0;
+
+      const safeEnqueue = (event: StreamEvent) => {
+        try {
+          controller.enqueue(encoder.encode(sseEncode(event)));
+        } catch {
+          // Controller already closed — ignore.
+        }
+      };
+
+      try {
+        for await (const chunk of strategy.stream({
+          prompt,
+          apiKey,
+          model,
+          signal: abortController.signal,
+        })) {
+          accumulated += chunk;
+          safeEnqueue({ type: "delta", text: chunk });
+
+          // Throttle progressive parsing: only emit when a new key shows up.
+          const partial = progressiveParse(accumulated);
+          if (partial) {
+            const keyCount = Object.keys(partial).length;
+            if (keyCount > lastPartialKeys) {
+              lastPartialKeys = keyCount;
+              safeEnqueue({ type: "partial", template: partial });
+            }
+          }
+        }
+
+        // Final parse + normalize. Throws on malformed JSON.
+        const raw = safeParseTemplate(accumulated);
+        const template = normalizeTemplate(raw);
+        safeEnqueue({ type: "done", template });
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.name === "AbortError"
+              ? "已取消"
+              : err.message
+            : "生成失败";
+        safeEnqueue({ type: "error", message });
+      } finally {
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+      }
+    },
+    cancel() {
+      abortController.abort();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }

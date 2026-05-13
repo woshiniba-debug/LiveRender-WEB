@@ -1,139 +1,91 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Header from "@/components/Header";
 import PromptInput from "@/components/PromptInput";
 import PreviewPanel from "@/components/PreviewPanel";
 import ApiSettings from "@/components/ApiSettings";
 import MobileTabBar, { MobileTab } from "@/components/MobileTabBar";
-import { ApiConfig, GenerateResult, HistoryEntry } from "@/lib/types";
-import { API_PROVIDERS } from "@/lib/apiProviders";
-import { generateMockCode, matchTemplate } from "@/lib/mockData";
-
-const STORAGE_KEY = "aiwd_api_config";
-const HISTORY_KEY = "aiwd_history";
-const MAX_HISTORY = 5;
+import type { GenerateResult, HistoryEntry } from "@/lib/types";
+import { useApiConfig } from "@/hooks/useApiConfig";
+import { useHistory } from "@/hooks/useHistory";
+import { useGenerate } from "@/hooks/useGenerate";
 
 export default function Home() {
-  const [result, setResult] = useState<GenerateResult | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [apiConfig, setApiConfig] = useState<ApiConfig | null>(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [lastPrompt, setLastPrompt] = useState<string | null>(null);
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [mobileTab, setMobileTab] = useState<MobileTab>("input");
+  const { config: apiConfig, save: saveConfig } = useApiConfig();
+  const { entries: history, push: pushHistory } = useHistory(5);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as ApiConfig;
-        if (parsed.apiKey && parsed.provider && parsed.model) setApiConfig(parsed);
-      }
-    } catch { /* ignore */ }
-
-    try {
-      const saved = localStorage.getItem(HISTORY_KEY);
-      if (saved) setHistory(JSON.parse(saved) as HistoryEntry[]);
-    } catch { /* ignore */ }
-  }, []);
-
-  const handleSaveConfig = (config: ApiConfig | null) => {
-    if (!config || !config.apiKey) {
-      localStorage.removeItem(STORAGE_KEY);
-      setApiConfig(null);
-    } else {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-      setApiConfig(config);
-    }
-  };
-
-  const pushHistory = useCallback((prompt: string, gen: GenerateResult) => {
-    const entry: HistoryEntry = {
-      id: String(Date.now()),
-      prompt,
-      result: gen,
-      createdAt: Date.now(),
-    };
-    setHistory((prev) => {
-      const next = [entry, ...prev.filter((e) => e.prompt !== prompt)].slice(0, MAX_HISTORY);
-      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
-
-  const runGenerate = useCallback(
-    async (prompt: string) => {
-      setIsGenerating(true);
-      setError(null);
-      setLastPrompt(prompt);
-      // Auto-switch to preview on mobile as soon as generation starts
-      setMobileTab("preview");
-
-      if (apiConfig?.apiKey) {
-        try {
-          const res = await fetch("/api/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              prompt,
-              provider: apiConfig.provider,
-              apiKey: apiConfig.apiKey,
-              model: apiConfig.model,
-            }),
-          });
-
-          const data = await res.json() as {
-            template?: GenerateResult["template"];
-            error?: string;
-          };
-
-          if (!res.ok) throw new Error(data.error ?? "生成失败");
-
-          const template = data.template!;
-          const code = generateMockCode(template);
-          const gen: GenerateResult = {
-            template,
-            code,
-            timestamp: Date.now(),
-            isAiGenerated: true,
-            providerName: API_PROVIDERS[apiConfig.provider]?.name,
-          };
-          setResult(gen);
-          pushHistory(prompt, gen);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : "生成失败，请检查 API Key 是否正确");
-        }
-      } else {
-        await new Promise((r) => setTimeout(r, 1200 + Math.random() * 500));
-        const template = matchTemplate(prompt);
-        const code = generateMockCode(template);
-        const gen: GenerateResult = { template, code, timestamp: Date.now(), isAiGenerated: false };
-        setResult(gen);
-        pushHistory(prompt, gen);
-      }
-
-      setIsGenerating(false);
-    },
-    [apiConfig, pushHistory]
+  const handleSuccess = useCallback(
+    (prompt: string, result: GenerateResult) => pushHistory(prompt, result),
+    [pushHistory]
   );
 
-  const handleGenerate = (prompt: string) => runGenerate(prompt);
-  const handleRegenerate = () => { if (lastPrompt) runGenerate(lastPrompt); };
-  const handleSelectHistory = (entry: HistoryEntry) => {
-    setResult(entry.result);
-    setLastPrompt(entry.prompt);
-    setError(null);
-    setMobileTab("preview");
-  };
+  const { state, generate, regenerate, abort, restore } = useGenerate(
+    apiConfig,
+    { onSuccess: handleSuccess }
+  );
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<MobileTab>("input");
+
+  // Derive UI-shape props from the discriminated union — single source of truth.
+  const view = useMemo(() => {
+    switch (state.status) {
+      case "generating":
+        return {
+          result: null as GenerateResult | null,
+          isGenerating: true,
+          error: null as string | null,
+          lastPrompt: state.prompt,
+          streamingTemplate: state.partial ?? null,
+        };
+      case "success":
+        return {
+          result: state.result,
+          isGenerating: false,
+          error: null as string | null,
+          lastPrompt: state.prompt,
+          streamingTemplate: null,
+        };
+      case "error":
+        return {
+          result: null as GenerateResult | null,
+          isGenerating: false,
+          error: state.message,
+          lastPrompt: state.prompt,
+          streamingTemplate: null,
+        };
+      case "idle":
+      default:
+        return {
+          result: null as GenerateResult | null,
+          isGenerating: false,
+          error: null as string | null,
+          lastPrompt: null as string | null,
+          streamingTemplate: null,
+        };
+    }
+  }, [state]);
+
+  const handleGenerate = useCallback(
+    (prompt: string) => {
+      setMobileTab("preview");
+      generate(prompt);
+    },
+    [generate]
+  );
+
+  const handleSelectHistory = useCallback(
+    (entry: HistoryEntry) => {
+      restore(entry.result, entry.prompt);
+      setMobileTab("preview");
+    },
+    [restore]
+  );
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#f8fafc]">
-      <Header
-        apiConfig={apiConfig}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-      />
+      <Header apiConfig={apiConfig} onOpenSettings={() => setIsSettingsOpen(true)} />
 
       <main className="flex flex-1 overflow-hidden">
         {/* Left panel — input */}
@@ -146,7 +98,7 @@ export default function Home() {
         >
           <PromptInput
             onGenerate={handleGenerate}
-            isGenerating={isGenerating}
+            isGenerating={view.isGenerating}
             apiConfig={apiConfig}
             onOpenSettings={() => setIsSettingsOpen(true)}
             history={history}
@@ -163,11 +115,13 @@ export default function Home() {
           `}
         >
           <PreviewPanel
-            result={result}
-            isGenerating={isGenerating}
-            error={error}
-            lastPrompt={lastPrompt}
-            onRegenerate={handleRegenerate}
+            result={view.result}
+            isGenerating={view.isGenerating}
+            error={view.error}
+            lastPrompt={view.lastPrompt}
+            streamingTemplate={view.streamingTemplate}
+            onRegenerate={regenerate}
+            onCancel={abort}
           />
         </section>
       </main>
@@ -176,15 +130,15 @@ export default function Home() {
       <MobileTabBar
         activeTab={mobileTab}
         onTabChange={setMobileTab}
-        hasResult={!!result || !!error}
-        isGenerating={isGenerating}
+        hasResult={!!view.result || !!view.error}
+        isGenerating={view.isGenerating}
       />
 
       <ApiSettings
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         config={apiConfig}
-        onSave={handleSaveConfig}
+        onSave={saveConfig}
       />
     </div>
   );
